@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphGrid - Collaborative Project Management</title>
+    
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        body, html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0; width: 100%; height: 100%; background-color: #f4f7f6; color: #333; overflow: hidden; }
+        #app { display: flex; flex-direction: column; height: 100vh; }
+        header { padding: 10px 25px; background-color: #ffffff; border-bottom: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); flex-shrink: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { margin: 0; font-size: 1.5em; color: #2c3e50; }
+        #settings-button { background: none; border: none; cursor: pointer; font-size: 24px; color: #7f8c8d; }
+        #settings-button:hover { color: #2c3e50; }
+        main { flex-grow: 1; min-height: 0; display: flex; gap: 20px; padding: 20px; position: relative; }
+        #graph-container { flex-grow: 1; height: 100%; border: 1px solid #dcdcdc; background-color: #ffffff; border-radius: 8px; }
+        #side-panel { width: 350px; flex-shrink: 0; background-color: #ffffff; border-radius: 8px; border: 1px solid #dcdcdc; padding: 20px; display: flex; flex-direction: column; gap: 25px; overflow-y: auto; }
+        .panel-section h3 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; font-size: 1.1em; color: #2c3e50; }
+        #command-input, .login-input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 14px; }
+        .command-help { font-size: 0.8em; color: #777; margin-top: 8px; line-height: 1.4; }
+        .login-input { font-family: inherit; }
+        .login-button { width: 100%; padding: 10px; background-color: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+        .login-button:hover { background-color: #2980b9; }
+        .user-info { font-size: 0.9em; text-align: center; }
+        #logout-link { color: #3498db; cursor: pointer; text-decoration: underline; font-size: 0.9em; }
+        #selected-node-details p, #selected-edge-details p { margin: 5px 0 10px; }
+        #selected-node-details strong, #selected-edge-details strong { color: #555; }
+        .no-selection { color: #888; font-style: italic; text-align: center; }
+        .action-button { background-color: #2ecc71; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; width: 100%; margin-top: 15px; transition: background-color 0.2s; }
+        .action-button:hover { background-color: #27ae60; }
+        .delete-button { background-color: #e74c3c; }
+        .delete-button:hover { background-color: #c0392b; }
+        .completion-slider { width: 100%; cursor: pointer; }
+        .completion-label { display: block; text-align: center; margin-top: 5px; font-weight: bold; }
+        #hover-tooltip { position: absolute; background-color: rgba(0, 0, 0, 0.8); color: white; padding: 8px 12px; border-radius: 5px; font-size: 13px; pointer-events: none; white-space: pre-wrap; z-index: 1000; }
+        #hover-tooltip p { margin: 2px 0; font-size: 0.9em; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .modal-content { background: white; padding: 30px; border-radius: 8px; width: 90%; max-width: 600px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .modal-content h2 { margin-top: 0; }
+        .modal-content label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .modal-content input, .modal-content textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 15px; font-size: 1em; }
+        .modal-content textarea { height: 150px; font-family: 'Courier New', Courier, monospace; resize: vertical; }
+        .modal-actions { text-align: right; }
+        .modal-button { padding: 10px 20px; border-radius: 5px; border: none; cursor: pointer; font-size: 1em; margin-left: 10px; }
+        .save-button { background-color: #27ae60; color: white; }
+        .save-button:hover { background-color: #229954; }
+        .cancel-button { background-color: #f1f1f1; }
+        .cancel-button:hover { background-color: #e1e1e1; }
+        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.8); display: flex; justify-content: center; align-items: center; z-index: 2000; font-size: 1.5em; color: #333; }
+        .notification-bar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: #2c3e50; color: white; padding: 12px 25px; border-radius: 8px; z-index: 2001; box-shadow: 0 4px 10px rgba(0,0,0,0.2); transition: opacity 0.5s, transform 0.5s; opacity: 0; }
+        .notification-bar.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .sidebar-details-section { margin-top: 20px; }
+        .sidebar-details-section h4 { margin-top: 0; margin-bottom: 8px; font-size: 0.9em; color: #555; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #eee; padding-bottom: 5px;}
+        .properties-list p { margin: 3px 0; }
+        .properties-list, .notes-content { font-size: 0.9em; }
+        .notes-content { background-color: #f9f9fa; border: 1px solid #e9e9e9; border-radius: 4px; padding: 10px; white-space: pre-wrap; word-wrap: break-word; max-height: 150px; overflow-y: auto; }
+        .no-content-notice { font-style: italic; color: #888; font-size: 0.9em; padding: 5px 0; }
+        .edge-details { text-align: center; background-color: #f9f9fa; border: 1px solid #e9e9e9; padding: 15px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="loading-overlay" v-if="isLoading">Loading Graph...</div>
+        
+        <header>
+            <h1>GraphGrid</h1>
+            <button id="settings-button" title="Global Settings" @click="openSettingsModal">⚙️</button>
+        </header>
+        
+        <main>
+            <div id="graph-container"></div>
+            <div id="hover-tooltip" v-if="tooltip.visible" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }">
+                <strong>{{ tooltip.label }}</strong><hr style="opacity: 0.3; margin: 4px 0;">
+                <p v-for="(value, key) in tooltip.properties" :key="key"><strong>{{key}}:</strong> {{value}}</p>
+            </div>
+
+            <aside id="side-panel">
+                <div class="panel-section" v-if="!user.name">
+                    <h3>Join the Team</h3>
+                    <input type="text" class="login-input" placeholder="Enter your name" v-model="tempUserName" @keyup.enter="login">
+                    <button class="login-button" @click="login">Login</button>
+                </div>
+                <div v-else>
+                    <div class="panel-section user-info">Logged in as <strong>{{ user.name }}</strong><br><a id="logout-link" @click="logout">(Logout)</a></div>
+                    <div class="panel-section">
+                        <h3>Quick Actions</h3>
+                        <input type="text" id="command-input" placeholder='add node "New Task"' v-model="commandInput" @keyup.enter="processCommand">
+                        <!-- MODIFICATION START -->
+                        <div class="command-help"><strong>Commands:</strong><br><code>add node "Name"</code><br><code>link "Source" to "Target"</code><br><code>unlink "Source" to "Target"</code></div>
+                        <!-- MODIFICATION END -->
+                    </div>
+                    <div class="panel-section">
+                        <h3>Selection Details</h3>
+                        <!-- MODIFICATION START: Panel now handles both nodes and edges -->
+                        <div id="selected-node-details" v-if="selectedNode">
+                            <p><strong>Label:</strong> {{ selectedNode.label }}</p>
+                            <div><strong>Completion:</strong><input type="range" min="0" max="100" class="completion-slider" v-model.number="selectedNode.completion" @input="updateNodeCompletion"><span class="completion-label">{{ selectedNode.completion }}%</span></div>
+                            
+                            <div class="sidebar-details-section">
+                                <h4>Properties</h4>
+                                <div class="properties-list" v-if="Object.keys(selectedNodeProperties).length > 0">
+                                    <p v-for="(value, key) in selectedNodeProperties" :key="key">
+                                        <strong>{{ key }}:</strong> {{ value }}
+                                    </p>
+                                </div>
+                                <div v-else class="no-content-notice">No custom properties.</div>
+                            </div>
+
+                            <div class="sidebar-details-section">
+                                <h4>Notes</h4>
+                                <div v-if="selectedNode.notes" class="notes-content">{{ selectedNode.notes }}</div>
+                                <div v-else class="no-content-notice">No notes for this task.</div>
+                            </div>
+
+                            <button class="action-button" @click="toggleFlagOnSelectedNode">{{ isMyFlagOnSelectedNode ? 'Remove My Flag' : 'Place My Flag Here' }}</button>
+                            <button class="action-button delete-button" @click="deleteSelectedNode">Delete Node</button>
+                            <small style="display: block; text-align: center; margin-top: 10px;">Double-click a node to edit all details.</small>
+                        </div>
+
+                        <div id="selected-edge-details" v-else-if="selectedEdge">
+                            <div class="edge-details">
+                                <p><strong>Link:</strong><br>"{{ selectedEdge.fromLabel }}"<br>
+                                    <span style="font-size: 20px; font-weight: bold; color: #3498db;">→</span><br>
+                                    "{{ selectedEdge.toLabel }}"</p>
+                            </div>
+                            <button class="action-button delete-button" @click="deleteSelectedEdge">Delete Link</button>
+                        </div>
+
+                        <div v-else class="no-selection">Click a node or an edge to see its details.</div>
+                        <!-- MODIFICATION END -->
+                    </div>
+                </div>
+            </aside>
+        </main>
+        
+        <!-- MODIFICATION START: Replaced old modal with new one -->
+        <div class="modal-overlay" v-if="isModalVisible" @click.self="closeModal">
+            <div class="modal-content">
+                <h2>Edit Task Details</h2>
+                
+                <!-- Input for the Node's Name -->
+                <label for="node-label">Task Name</label>
+                <input type="text" id="node-label" v-model="editingNode.label">
+
+                <!-- Dynamically generated inputs for each property -->
+                <div v-for="(value, key) in editingNode.customProps" :key="key">
+                    <label :for="'prop-' + key">{{ key }}</label>
+                    <input type="text" :id="'prop-' + key" v-model="editingNode.customProps[key]">
+                </div>
+
+                <!-- Text area for general notes -->
+                <label for="node-notes">Notes</label>
+                <textarea id="node-notes" v-model="editingNode.notes" placeholder="Add checklists, links, or other details here..."></textarea>
+                
+                <div class="modal-actions">
+                    <button class="modal-button cancel-button" @click="closeModal">Cancel</button>
+                    <button class="modal-button save-button" @click="saveNodeDetails">Save Changes</button>
+                </div>
+            </div>
+        </div>
+        <!-- MODIFICATION END -->
+        <div class="modal-overlay" v-if="isSettingsModalVisible" @click.self="closeSettingsModal"><div class="modal-content"><h2>Global Properties Template</h2><p>Define a default set of JSON properties for all newly created nodes.</p><label for="global-properties">Properties (JSON format)</label><textarea id="global-properties" v-model="globalPropertiesString"></textarea><div class="modal-actions"><button class="modal-button cancel-button" @click="closeSettingsModal">Cancel</button><button class="modal-button save-button" @click="saveSettings">Save Template</button></div></div></div>
+        <div class="notification-bar" :class="{ visible: notification.visible }">{{ notification.message }}</div>
+    </div>
+
+<script>
+const { createApp, ref, onMounted, reactive, computed } = Vue;
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAEu_pRVi2yVA4b9e72-xr62TIob_IHlyM",
+  authDomain: "graphgrid-5ef7b.firebaseapp.com",
+  projectId: "graphgrid-5ef7b",
+  storageBucket: "graphgrid-5ef7b.firebasestorage.app",
+  messagingSenderId: "791933459016",
+  appId: "1:791933459016:web:993dd808405938254b967d",
+  measurementId: "G-3Y4K7YRGN3"
+};
+
+// --- INITIALIZATION ---
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const nodesCollection = db.collection('nodes');
+const edgesCollection = db.collection('edges');
+const flagsCollection = db.collection('flags');
+const settingsDoc = db.collection('settings').doc('globalNodeTemplate');
+
+createApp({
+    setup() {
+        let network = null;
+        const visNodes = new vis.DataSet();
+        const visEdges = new vis.DataSet();
+        const isLoading = ref(true);
+        const commandInput = ref('');
+        const selectedNode = ref(null);
+        // MODIFICATION START
+        const selectedEdgeId = ref(null);
+        // MODIFICATION END
+        const tooltip = reactive({ visible: false, x: 0, y: 0, label: '', properties: {} });
+        const isModalVisible = ref(false);
+        const editingNode = ref(null);
+        const isSettingsModalVisible = ref(false);
+        const globalPropertiesString = ref('{}');
+        const user = reactive({ name: '', color: '', id: null });
+        const tempUserName = ref('');
+        const flags = reactive(new Map());
+        const notification = reactive({ visible: false, message: '', timeoutId: null });
+        const userColors = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c'];
+        
+        const isMyFlagOnSelectedNode = computed(() => {
+            if (!selectedNode.value || !user.id) return false;
+            const nodeFlags = flags.get(selectedNode.value.id) || [];
+            return nodeFlags.some(flag => flag.userId === user.id);
+        });
+
+        const selectedNodeProperties = computed(() => {
+            if (!selectedNode.value) return {};
+            const { id, label, completion, color, x, y, notes, ...customProps } = selectedNode.value;
+            return customProps;
+        });
+
+        // MODIFICATION START
+        const selectedEdge = computed(() => {
+            if (!selectedEdgeId.value) return null;
+            const edge = visEdges.get(selectedEdgeId.value);
+            if (!edge) return null;
+
+            const fromNode = visNodes.get(edge.from);
+            const toNode = visNodes.get(edge.to);
+
+            return {
+                id: edge.id,
+                from: edge.from,
+                to: edge.to,
+                fromLabel: fromNode ? fromNode.label : 'Unknown Node',
+                toLabel: toNode ? toNode.label : 'Unknown Node'
+            };
+        });
+        // MODIFICATION END
+
+        const getStableColorForUser = (name) => {
+            let hash = 0;
+            for (let i = 0; i < name.length; i++) {
+                hash = name.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const index = Math.abs(hash % userColors.length);
+            return userColors[index];
+        };
+
+        const login = () => {
+            const trimmedName = tempUserName.value.trim();
+            if (trimmedName) {
+                user.name = trimmedName;
+                user.id = trimmedName.toLowerCase().replace(/\s/g, '_');
+                user.color = getStableColorForUser(trimmedName);
+                localStorage.setItem('graphgrid_user', JSON.stringify(user));
+            }
+        };
+
+        const logout = () => {
+            localStorage.removeItem('graphgrid_user');
+            window.location.reload();
+        };
+
+        const checkExistingLogin = () => { const storedUser = localStorage.getItem('graphgrid_user'); if (storedUser) Object.assign(user, JSON.parse(storedUser)); };
+        const showNotification = (message, duration = 3000) => { if (notification.timeoutId) clearTimeout(notification.timeoutId); notification.message = message; notification.visible = true; notification.timeoutId = setTimeout(() => { notification.visible = false; }, duration); };
+
+        const initializeGraph = () => {
+            const container = document.getElementById('graph-container');
+            const data = { nodes: visNodes, edges: visEdges };
+            const options = {
+                nodes: { shape: 'circle', size: 50, font: { size: 14, color: '#343434' }, borderWidth: 0, color: { background: '#E0E0E0', highlight: { background: '#C5C5C5' }, hover: { background: '#D3D3D3' } }, scaling: { label: { enabled: false } } },
+                edges: { width: 2, color: { color: '#848484', highlight: '#3498db' }, smooth: { type: 'cubicBezier' } },
+                physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -100, centralGravity: 0.01, springLength: 100, springConstant: 0.08, avoidOverlap: 1.0 }, stabilization: { iterations: 200 } },
+                interaction: { dragNodes: true, dragView: true, zoomView: true, hover: true }
+            };
+            network = new vis.Network(container, data, options);
+            setupRealtimeListeners();
+            setupGraphEventListeners();
+            isLoading.value = false;
+        };
+
+        const setupRealtimeListeners = () => {
+            nodesCollection.onSnapshot(snapshot => { snapshot.docChanges().forEach(change => { const data = { id: change.doc.id, ...change.doc.data() }; if (change.type === 'added') visNodes.add(data); else if (change.type === 'modified') { visNodes.update(data); if (selectedNode.value && selectedNode.value.id === data.id) { selectedNode.value = visNodes.get(data.id); } } else if (change.type === 'removed') visNodes.remove(data.id); }); });
+            edgesCollection.onSnapshot(snapshot => { snapshot.docChanges().forEach(change => { const data = change.doc.data(); if (change.type === 'added') visEdges.add({ id: change.doc.id, ...data }); else if (change.type === 'removed') visEdges.remove({ id: change.doc.id }); }); });
+            flagsCollection.onSnapshot(snapshot => {
+                const newFlags = new Map();
+                snapshot.forEach(doc => { const flagData = doc.data(); if (!newFlags.has(flagData.nodeId)) newFlags.set(flagData.nodeId, []); newFlags.get(flagData.nodeId).push({ id: doc.id, ...flagData }); });
+                network.redraw();
+                flags.clear();
+                for (const [key, value] of newFlags.entries()) flags.set(key, value);
+            });
+        };
+        
+        const setupGraphEventListeners = () => {
+            // MODIFICATION START: Click handler now manages nodes AND edges
+            network.on('click', params => {
+                const nodeId = params.nodes[0];
+                const edgeId = params.edges[0];
+                
+                if (nodeId) {
+                    selectedNode.value = visNodes.get(nodeId);
+                    selectedEdgeId.value = null;
+                } else if (edgeId) {
+                    selectedEdgeId.value = edgeId;
+                    selectedNode.value = null;
+                } else {
+                    selectedNode.value = null;
+                    selectedEdgeId.value = null;
+                }
+            });
+            // MODIFICATION END
+            
+            network.on('doubleClick', params => { if (params.nodes[0]) openEditModal(params.nodes[0]); });
+            network.on('hoverNode', params => {
+                const node = visNodes.get(params.node); const pointer = params.pointer.DOM; tooltip.label = node.label;
+                const { id, label, color, x, y, ...props } = node; tooltip.properties = props;
+                tooltip.x = pointer.x + 15; tooltip.y = pointer.y - 10; tooltip.visible = true;
+            });
+            network.on('blurNode', () => { tooltip.visible = false; });
+            network.on("afterDrawing", (ctx) => {
+                const nodePositions = network.getPositions();
+                visNodes.forEach(node => {
+                    if (node.completion > 0) {
+                        const pos = nodePositions[node.id]; if(!pos) return;
+                        const radius = network.body.nodes[node.id]?.options?.size || 25;
+                        ctx.beginPath();
+                        ctx.fillStyle = 'rgba(128, 128, 128, 0.4)';
+                        const startAngle = -0.5 * Math.PI; const endAngle = startAngle + (node.completion / 100) * 2 * Math.PI;
+                        ctx.arc(pos.x, pos.y, radius, startAngle, endAngle, false); ctx.lineTo(pos.x, pos.y); ctx.fill();
+                    }
+                });
+                flags.forEach((flagArray, nodeId) => {
+                    const pos = nodePositions[nodeId]; if (!pos || !network.body.nodes[nodeId]) return;
+                    const radius = network.body.nodes[nodeId].options.size; const flagHeight = 20; const flagPadding = 5; const textHorizontalPadding = 8;
+                    const flagBaseX = pos.x + radius + 10; const initialYOffset = - (flagArray.length * (flagHeight + flagPadding)) / 2 + flagHeight / 2;
+                    flagArray.forEach((flag, index) => {
+                        const userName = flag.userName || 'User'; ctx.font = "bold 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+                        ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+                        const textWidth = ctx.measureText(userName).width; const flagWidth = textWidth + (textHorizontalPadding * 2);
+                        const flagY = pos.y + initialYOffset + (index * (flagHeight + flagPadding));
+                        ctx.fillStyle = flag.userColor || '#7f8c8d'; ctx.fillRect(flagBaseX, flagY - flagHeight / 2, flagWidth, flagHeight);
+                        ctx.fillStyle = 'white'; ctx.fillText(userName, flagBaseX + textHorizontalPadding, flagY);
+                    });
+                });
+            });
+        };
+
+        const processCommand = async () => {
+            const command = commandInput.value.trim();
+
+            // FIX: Added the '^' anchor to the start of each regex.
+            // This ensures the command must START WITH the given keyword.
+            const addNodeRegex = /^add node "([^"]+)"/i;
+            const linkNodesRegex = /^link "([^"]+)" to "([^"]+)"/i;
+            const unlinkNodesRegex = /^unlink "([^"]+)" to "([^"]+)"/i;
+            let match;
+
+            if (match = command.match(addNodeRegex)) {
+                let defaultProps = {}; try { const doc = await settingsDoc.get(); if (doc.exists) defaultProps = doc.data(); } catch (e) { console.error(e); }
+                await nodesCollection.add({ label: match[1], completion: 0, notes: '', ...defaultProps }); showNotification(`Node "${match[1]}" added.`);
+            } else if (match = command.match(linkNodesRegex)) {
+                const sourceNodes = await nodesCollection.where("label", "==", match[1]).get(); const targetNodes = await nodesCollection.where("label", "==", match[2]).get();
+                if (!sourceNodes.empty && !targetNodes.empty) { await edgesCollection.add({ from: sourceNodes.docs[0].id, to: targetNodes.docs[0].id, arrows: 'to' }); showNotification(`Linked "${match[1]}" to "${match[2]}".`); } else { showNotification("Error: Couldn't find one or both nodes."); }
+            } else if (match = command.match(unlinkNodesRegex)) {
+                const sourceNodes = await nodesCollection.where("label", "==", match[1]).get();
+                const targetNodes = await nodesCollection.where("label", "==", match[2]).get();
+                if (sourceNodes.empty || targetNodes.empty) {
+                    showNotification("Error: Couldn't find one or both nodes to unlink.");
+                } else {
+                    const sourceId = sourceNodes.docs[0].id;
+                    const targetId = targetNodes.docs[0].id;
+                    const edgeQuery = await edgesCollection.where("from", "==", sourceId).where("to", "==", targetId).get();
+                    if (!edgeQuery.empty) {
+                        // FIX: Logic was correct here, just needed the regex to work.
+                        await edgesCollection.doc(edgeQuery.docs[0].id).delete();
+                        showNotification(`Unlinked "${match[1]}" from "${match[2]}".`);
+                    } else {
+                        showNotification("Error: No link found between these nodes.");
+                    }
+                }
+            } else { showNotification('Unknown command format.'); }
+            
+            commandInput.value = '';
+        };
+
+        const deleteSelectedNode = () => { if (!selectedNode.value || !confirm(`Are you sure you want to delete "${selectedNode.value.label}"? This cannot be undone.`)) return; const nodeToDelete = selectedNode.value; const batch = db.batch(); edgesCollection.where('from', '==', nodeToDelete.id).get().then(snap => snap.forEach(doc => batch.delete(doc.ref))); edgesCollection.where('to', '==', nodeToDelete.id).get().then(snap => snap.forEach(doc => batch.delete(doc.ref))); flagsCollection.where('nodeId', '==', nodeToDelete.id).get().then(snap => snap.forEach(doc => batch.delete(doc.ref))); batch.delete(nodesCollection.doc(nodeToDelete.id)); batch.commit().then(() => { showNotification(`Node "${nodeToDelete.label}" deleted.`); selectedNode.value = null; }); };
+        
+        // MODIFICATION START: New function to delete an edge
+        const deleteSelectedEdge = () => {
+            if (!selectedEdge.value || !confirm(`Are you sure you want to delete the link from "${selectedEdge.value.fromLabel}" to "${selectedEdge.value.toLabel}"?`)) return;
+            const edgeToDelete = selectedEdge.value;
+            edgesCollection.doc(edgeToDelete.id).delete().then(() => {
+                showNotification(`Link from "${edgeToDelete.fromLabel}" to "${edgeToDelete.toLabel}" deleted.`);
+                selectedEdgeId.value = null;
+            });
+        };
+        // MODIFICATION END
+
+        const updateNodeCompletion = () => { if (selectedNode.value) nodesCollection.doc(selectedNode.value.id).update({ completion: selectedNode.value.completion }); };
+        
+        const toggleFlagOnSelectedNode = async () => {
+            if (!selectedNode.value || !user.id) return; 
+            const existingFlagsQuery = await flagsCollection.where('userId', '==', user.id).where('nodeId', '==', selectedNode.value.id).get();
+            if (!existingFlagsQuery.empty) { 
+                existingFlagsQuery.forEach(doc => doc.ref.delete()); 
+                showNotification(`Flag removed from "${selectedNode.value.label}"`); 
+            } else { 
+                await flagsCollection.add({ nodeId: selectedNode.value.id, userId: user.id, userName: user.name, userColor: user.color }); 
+                showNotification(`You are now working on "${selectedNode.value.label}"`); 
+            }
+        };
+
+        // MODIFICATION START: Replaced openEditModal
+        const openEditModal = (nodeId) => {
+            const fullNode = visNodes.get(nodeId);
+            const { id, label, completion, color, x, y, notes, ...customProps } = fullNode;
+            editingNode.value = { id, label, notes, customProps }; // Separate custom props
+            isModalVisible.value = true;
+        };
+        // MODIFICATION END
+
+        const closeModal = () => { isModalVisible.value = false; editingNode.value = null; };
+        
+        // MODIFICATION START: Replaced saveNodeDetails
+        const saveNodeDetails = () => {
+            const { id, label, notes, customProps } = editingNode.value;
+            // Merge the standard fields and the custom properties back together for saving
+            const dataToSave = {
+                label,
+                notes,
+                ...customProps
+            };
+            nodesCollection.doc(id).update(dataToSave);
+            showNotification("Node details saved!");
+            closeModal();
+        };
+        // MODIFICATION END
+
+        const openSettingsModal = () => { settingsDoc.get().then(doc => { if (doc.exists) globalPropertiesString.value = JSON.stringify(doc.data(), null, 2); else globalPropertiesString.value = JSON.stringify({ Status: 'To-Do', Priority: 'Medium' }, null, 2); isSettingsModalVisible.value = true; }); };
+        const closeSettingsModal = () => isSettingsModalVisible.value = false;
+        const saveSettings = () => { try { const properties = JSON.parse(globalPropertiesString.value); settingsDoc.set(properties); showNotification("Global template saved successfully!"); closeSettingsModal(); } catch (e) { showNotification("Error: Invalid JSON format.", 5000); }};
+
+        onMounted(() => { checkExistingLogin(); initializeGraph(); });
+
+        return { isLoading, commandInput, selectedNode, tooltip, isModalVisible, editingNode, isSettingsModalVisible, globalPropertiesString, user, tempUserName, notification, isMyFlagOnSelectedNode, selectedNodeProperties, processCommand, deleteSelectedNode, updateNodeCompletion, toggleFlagOnSelectedNode, openEditModal, closeModal, saveNodeDetails, login, logout, openSettingsModal, closeSettingsModal, saveSettings, /* MODIFICATION START */ selectedEdge, deleteSelectedEdge /* MODIFICATION END */ };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
